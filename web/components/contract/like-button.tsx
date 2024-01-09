@@ -1,12 +1,11 @@
 import { HeartIcon } from '@heroicons/react/outline'
 import clsx from 'clsx'
-import { Contract } from 'common/contract'
-import { Reaction, ReactionContentTypes, ReactionTypes } from 'common/reaction'
+import { Reaction, ReactionContentTypes } from 'common/reaction'
 import { User } from 'common/user'
-import { memo, useEffect, useState } from 'react'
-import { useIsLiked, useLikesOnContent } from 'web/hooks/use-likes'
+import { memo, useState } from 'react'
+import { useLikesOnContent } from 'web/hooks/use-likes'
 import useLongTouch from 'web/hooks/use-long-touch'
-import { react, unReact } from 'web/lib/firebase/reactions'
+import { like, unLike } from 'web/lib/firebase/reactions'
 import { Col } from '../layout/col'
 import { Row } from '../layout/row'
 import {
@@ -19,18 +18,15 @@ import { UserLink } from '../widgets/user-link'
 import { LoadingIndicator } from '../widgets/loading-indicator'
 import { Button, SizeType } from 'web/components/buttons/button'
 import toast from 'react-hot-toast'
+import { track } from '@amplitude/analytics-browser'
 
 const LIKES_SHOWN = 3
-
-const ButtonReactionType = 'like' as ReactionTypes
 
 export const LikeButton = memo(function LikeButton(props: {
   contentId: string
   contentCreatorId: string
   user: User | null | undefined
   contentType: ReactionContentTypes
-  totalLikes: number
-  contract: Contract
   contentText: string
   trackingLocation: string
   className?: string
@@ -43,50 +39,35 @@ export const LikeButton = memo(function LikeButton(props: {
     contentType,
     contentCreatorId,
     contentId,
-    contract,
     contentText,
     className,
     trackingLocation,
     placement = 'bottom',
     size,
   } = props
-  const userLiked = useIsLiked(user?.id, contentType, contentId)
+  const likes = useLikesOnContent(contentType, contentId)
+  const liked = likes && likes.some((l) => l.userId === user?.id)
+  const totalLikes = likes ? likes.length : 0
+
   const disabled = props.disabled || !user
   const isMe = contentCreatorId === user?.id
-  const [liked, setLiked] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
-  const [totalLikes, setTotalLikes] = useState(props.totalLikes)
 
-  useEffect(() => {
-    setTotalLikes(props.totalLikes)
-  }, [props.totalLikes])
-
-  const onLike = async (like: boolean) => {
+  const onLike = async (shouldLike: boolean) => {
     if (!user) return
-    if (!like)
-      return await unReact(user.id, contentId, contentType, ButtonReactionType)
+    if (shouldLike) {
+      await like(contentId, contentType)
 
-    await react(
-      user,
-      contentId,
-      contentCreatorId,
-      contentType,
-      contract,
-      contract.question,
-      contentText,
-      ButtonReactionType,
-      { location: trackingLocation }
-    )
+      track('like', {
+        itemId: contentId,
+        location: trackingLocation,
+      })
+    } else {
+      await unLike(contentId, contentType)
+    }
   }
 
-  // Handle changes from our useLike hook
-  useEffect(() => {
-    setLiked(userLiked)
-  }, [userLiked])
-
   function handleLiked(liked: boolean) {
-    setLiked(liked)
-    setTotalLikes((prev) => (liked ? prev + 1 : prev - 1))
     onLike(liked)
   }
 
@@ -179,9 +160,6 @@ function getLikeDisplayList(
   const likedUserInfos = reacts.map((reaction) => {
     return {
       id: reaction.userId,
-      name: reaction.userDisplayName,
-      username: reaction.userUsername,
-      avatarUrl: reaction.userAvatarUrl,
     } as MultiUserLinkInfo
   })
 
